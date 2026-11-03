@@ -168,10 +168,13 @@ void processMessage(const char* message, uint32_t now) {
 
   // Sensor model identified for Aston Martin AM305 sensors
   if (strcmp(model, "BMW-GEN2") != 0) {
+    Serial.print("Ignored model: ");
+    Serial.println(model);
     return;
   }
 
   if (strcmp(mic, "CRC") != 0) {
+    Serial.println("Ignored message without CRC integrity");
     return;
   }
 
@@ -538,20 +541,31 @@ void loop() {
   const uint32_t updateTime = millis();
   const AlarmState alarms = getAlarms(updateTime);
   updateOutputs(updateTime, alarms);
-  updateDisplay(updateTime, alarms);
-    static uint32_t lastDiagnostics = 0;
+  // A complete OLED transfer takes about 100 ms at 100 kHz. Avoid
+  // blocking the decoder queue on every pass through the loop.
+  static uint32_t lastDisplay = 0;
+  if (uint32_t(updateTime - lastDisplay) >= 250UL) {
+    lastDisplay = updateTime;
+    updateDisplay(updateTime, alarms);
+  }
+  static uint32_t lastDiagnostics = 0;
 
   if (uint32_t(millis() - lastDiagnostics) >= 5000UL) {
     lastDiagnostics = millis();
-
+    const rtl_433_ESPStatus status = receiver.statusSnapshot();
     Serial.printf(
-      "RX DIAG: captures=%u decoded=%u unsuccessful=%u "
-      "captureDrops=%u queueDrops=%u\n",
-      (unsigned int)rtl_433_ESP::decoderSignals,
-      (unsigned int)rtl_433_ESP::decodedMessages,
-      (unsigned int)rtl_433_ESP::zeroDecodedSignals,
-      (unsigned int)rtl_433_ESP::droppedCaptureBuffers,
-      (unsigned int)rtl_433_ESP::droppedDecoderQueue
+      "RX DIAG: captures=%u processed=%u decoded=%u unsuccessful=%u "
+      "captureDrops=%u queueDrops=%u rssi=%d average=%d threshold=%d mode=%s\n",
+      status.capturedSignals,
+      status.decodedSignals,
+      status.decodedMessages,
+      status.zeroDecodedSignals,
+      status.droppedCaptureBuffers,
+      status.droppedDecoderQueue,
+      status.currentRssi,
+      status.averageRssi,
+      status.rssiThreshold,
+      rtl_433_ESP::ookModulation ? "OOK" : "FSK"
     );
   }
   delay(10);
